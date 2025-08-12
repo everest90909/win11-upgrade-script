@@ -1,0 +1,11 @@
+# Ignore PowerShell transient files
+*.ps1xml
+*.psc1
+*.psd1
+*.psm1
+*.ps1
+*.ps1~
+*.tmp
+*.bak
+.DS_Store
+Thumbs.db
