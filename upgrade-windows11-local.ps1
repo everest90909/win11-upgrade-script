@@ -183,6 +183,36 @@ $RemoteUpgradePayload = {
             return $false
         }
 
+        # --- Registry checks for upgrade blocks ---
+        try {
+            $osUpgradeKey = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\OSUpgrade"
+            if (Test-Path $osUpgradeKey) {
+                $allowUpgrade = Get-ItemProperty -Path $osUpgradeKey -Name AllowOSUpgrade -ErrorAction SilentlyContinue
+                if ($allowUpgrade.AllowOSUpgrade -ne 1) {
+                    Write-Log "❌ Registry block: AllowOSUpgrade is not set to 1."
+                    return $false
+                } else {
+                    Write-Log "AllowOSUpgrade registry key is set correctly."
+                }
+            }
+
+            $wuPolicyKey = "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate"
+            if (Test-Path $wuPolicyKey) {
+                $disableUpgrade = Get-ItemProperty -Path $wuPolicyKey -Name DisableOSUpgrade -ErrorAction SilentlyContinue
+                if ($disableUpgrade.DisableOSUpgrade -eq 1) {
+                    Write-Log "❌ Registry block: DisableOSUpgrade is set to 1."
+                    return $false
+                }
+
+                $targetRelease = Get-ItemProperty -Path $wuPolicyKey -Name TargetReleaseVersion -ErrorAction SilentlyContinue
+                if ($targetRelease.TargetReleaseVersion) {
+                    Write-Log "⚠ TargetReleaseVersion policy is set. May restrict upgrade."
+                }
+            }
+        } catch {
+            Write-Log "Registry check failed: $_"
+        }
+
         # Storage ≥ 64 GB free on system drive
         $systemDrive = (Get-Item -Path Env:SystemDrive).Value
         $sysDisk     = Get-CimInstance -ClassName Win32_LogicalDisk -Filter "DeviceID='$systemDrive'"
