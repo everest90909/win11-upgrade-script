@@ -1,52 +1,52 @@
-# Windows 11 In-Place Upgrade (PowerShell)
+# Windows 11 In‑Place Upgrade (PowerShell)
 
-Automates a **Windows 11 in-place upgrade** using Microsoft Setup (`setup.exe`) from an **ISO**, a **folder**, or a direct **`setup.exe`** path.  
-Includes hardware readiness checks (TPM 2.0, Secure Boot, CPU, RAM, storage) and a remote **orchestrator mode** that avoids the PowerShell “double-hop” problem by **copying media to the target** before running the upgrade.
+This repository contains a robust PowerShell automation that performs an **in‑place upgrade to Windows 11** using either:
+
+1) **Windows Setup (`setup.exe`)** from an **ISO**, a **media folder**, or a direct **`setup.exe`** path, **or**
+2) the **Windows 11 Installation Assistant** (downloaded at runtime and launched silently).
+
+The script supports **local** execution and an **orchestrator mode** (run from your admin box) that **copies media to the target** first to avoid the WinRM “double‑hop” problem.
 
 ---
 
-## ✨ Features
+## ✨ Highlights
 
-- ✅ TPM 2.0, Secure Boot, CPU (x64/ARM64), RAM (≥4 GB), storage (≥64 GB) checks  
-- ✅ Works with **ISO / folder / setup.exe** (local or UNC)  
-- ✅ **Remote orchestration**: copy media to target, then run locally on the target (no CredSSP required)  
-- ✅ ISO on UNC? It’s copied **locally** to the target before mounting (reliable for SYSTEM/Intune)  
-- ✅ Clear logging to `C:\Windows11UpgradeLog.txt`  
-- ✅ Minimal switches on `setup.exe` for a silent in-place upgrade
+- Full **hardware readiness checks**: TPM 2.0, Secure Boot, CPU (x64/ARM64), RAM ≥ 4 GB, **system drive free space ≥ 64 GB**.
+- **Two upgrade paths** in one script:
+  - **Setup.exe** from ISO/folder/direct path (mounts/dismounts ISO as needed).
+  - **Installation Assistant** (download + quiet switches).
+- **Local or Orchestrated remote** execution:
+  - Remote mode uses a PSSession, **copies the media to `C:\Temp` on the target**, then runs locally there.
+- **UNC-aware**: optional credentials for share access; ISO on a share is **copied locally** before mounting.
+- Clear logging to `C:\Windows11UpgradeLog.txt` (and IA copy logs when applicable).
+
+---
+
+## 📁 Script
+
+`upgrade-windows11.ps1`
+
+- **Local mode**: runs checks and upgrade on the current machine.
+- **Orchestrator mode**: specify a `-TargetComputer` (FQDN recommended); the script creates a PSSession, copies media (or downloads IA) to the target, runs locally there, and monitors best‑effort.
 
 ---
 
 ## 🧰 Requirements
 
-- **Windows 10** device you’re upgrading (target)  
-- **PowerShell 5.1+** (Windows PowerShell)  
-- **Setup media** for Windows 11 (ISO, or a folder containing `setup.exe`)  
-- Permissions:
-  - Local run: read access to media  
-  - Remote run: ability to **copy** to `C:\Temp` on the target and execute PowerShell remoting  
-- **Secure Boot enabled** and **TPM 2.0** (script validates)
+- Target device: Windows 10 (upgrading to Windows 11).
+- Windows PowerShell **5.1+**.
+- Administrator privileges on the target.
+- If using media from a UNC path, ensure **share + NTFS read** permissions (or pass `-ShareCredential`).
 
-> The script launches Windows Setup with:  
-> `/auto upgrade /quiet /noreboot /dynamicupdate enable`
-
----
-
-## 📦 Script
-
-`upgrade-windows11.ps1`
-
-- **Local mode** (default): run on the target device.  
-- **Orchestrator mode**: run from your admin box and specify `-TargetComputer`. Script will:
-  1) Create a PSSession  
-  2) Copy media to `C:\Temp\…` on the target  
-  3) Run the upgrade **locally** on the target  
-  4) Monitor best-effort
+> Windows Setup is launched with: `/auto upgrade /quiet /noreboot /dynamicupdate enable` by default.  
+> You can change reboot/update behavior with switches below.
 
 ---
 
 ## 🚀 Quick Start
 
-### Local (on the target)
+### Local — Using Windows Setup (ISO / folder / setup.exe)
+
 ```powershell
 # ISO
 .\upgrade-windows11.ps1 -MediaPath 'C:\ISO\Win11_24H2_English_x64.iso'
@@ -58,140 +58,109 @@ Includes hardware readiness checks (TPM 2.0, Secure Boot, CPU, RAM, storage) and
 .\upgrade-windows11.ps1 -MediaPath 'D:\Win11_24H2\setup.exe'
 ```
 
-### Orchestrator (from admin box → remote target)
+### Local — Using Installation Assistant (no media needed)
+
 ```powershell
-# Using domain creds to connect to the target
+.\upgrade-windows11.ps1 -UseInstallationAssistant
+```
+
+### Orchestrator — Remote target (copies media to target first)
+
+```powershell
+# Setup.exe route (UNC or local media path on your admin box)
 .\upgrade-windows11.ps1 `
   -TargetComputer 'PC123.domain.local' `
   -RemoteCredential (Get-Credential) `
   -MediaPath '\\fileserver\dist\Win11_24H2\setup.exe'
 ```
 
-> Orchestrator mode **copies** media to `C:\Temp\` on the target to avoid double-hop issues.  
-> If your `-MediaPath` is a UNC that requires access, you can also pass `-ShareCredential` for the copy step.
+### Orchestrator — Installation Assistant on remote target
+
+```powershell
+.\upgrade-windows11.ps1 `
+  -TargetComputer 'PC123.domain.local' `
+  -RemoteCredential (Get-Credential) `
+  -UseInstallationAssistant
+```
+
+> In orchestrator mode, the script creates `C:\Temp\` on the target (if missing), copies media there (or downloads IA), and then runs locally on that machine. This avoids the **double‑hop** issue.
 
 ---
 
 ## 🔧 Parameters
 
-| Parameter          | Required | Type            | Description |
-|--------------------|----------|-----------------|-------------|
-| `-MediaPath`       | Yes      | `string`        | Path to **.iso**, **setup.exe**, or a **folder** containing `setup.exe`. Local or UNC. |
-| `-TargetComputer`  | No       | `string`        | Run in **orchestrator mode** against a remote target (FQDN recommended). |
-| `-RemoteCredential`| No       | `pscredential`  | Credential used to create the PSSession to the **target**. |
-| `-ShareCredential` | No       | `pscredential`  | Credential used to access a **UNC media path** before copying to the target. |
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `-MediaPath` | `string` | No* | Path to **.iso**, **setup.exe**, or a **folder** containing `setup.exe`. Local or UNC. *Required for Setup route unless using `-UseInstallationAssistant`. |
+| `-UseInstallationAssistant` | `switch` | No | Use the **Windows 11 Installation Assistant** route (download + quiet run). |
+| `-TargetComputer` | `string` | No | Run in orchestrator mode against a remote target (FQDN recommended). |
+| `-RemoteCredential` | `pscredential` | No | Credential for the PSSession to `-TargetComputer`. |
+| `-ShareCredential` | `pscredential` | No | Credential to access a **UNC** media path before copying. |
+| `-AutoReboot` | `switch` | No | Setup: remove `/noreboot` so Windows can reboot automatically. |
+| `-DisableDynamicUpdate` | `switch` | No | Setup: pass `/dynamicupdate disable`. |
+| `-InstallAssistantDownloadURL` | `string` | No | Source URL used to download the Installation Assistant. |
+| `-DownloadDestination` | `string` | No | Local path where the IA installer is saved. |
+| `-UpdateLogLocation` | `string` | No | Folder for IA copy logs. |
 
 ---
 
-## 📝 What the Script Does (Flow)
+## 🧪 What the Script Does
 
-1. **Hardware checks** on the target:
-   - TPM present/ready/enabled/activated, **SpecVersion 2.0**
-   - **Secure Boot** (via `Confirm-SecureBootUEFI` with a `MSFT_SecureBoot` fallback)
-   - CPU **x64 (9)** or **ARM64 (12)**
-   - RAM **≥ 4 GB**
-   - System drive free space **≥ 64 GB**
-2. **Media handling**
-   - If **ISO** (UNC or local): copies ISO **locally to target**, mounts, runs `setup.exe`, then dismounts
-   - If **folder**: copies folder to `C:\Temp\…` on target (or uses it directly in local mode)
-   - If **setup.exe**: copies its **entire folder** to ensure `sources\*` is present
-3. **Launches setup** silently:
-   - `/auto upgrade /quiet /noreboot /dynamicupdate enable`
-4. **Monitors** `setup.exe` process best-effort and logs to `C:\Windows11UpgradeLog.txt`
+1. **Validates hardware** on the target: TPM 2.0 (SpecVersion), Secure Boot, CPU (x64/ARM64), RAM, and C: space.  
+2. **Handles media** (Setup.exe route):
+   - ISO on UNC? Copy **locally** first, then mount and run `setup.exe`.
+   - Folder or direct `setup.exe`? Use it directly (or copy to target in orchestrator mode).
+   - **Dismounts** the ISO after staging (Setup has already copied what it needs).
+3. **Installation Assistant route**:
+   - Downloads the installer (or uses installed `Windows10UpgraderApp.exe`) and runs quietly with proven args.
+4. **Monitors** `setup.exe` best‑effort and logs to `C:\Windows11UpgradeLog.txt` (IA logs go to your `-UpdateLogLocation`).
 
 ---
 
-## 🔒 Security & Permissions
+## 🔒 Security Notes
 
-- **Orchestrator mode** uses **Kerberos** by default (`-Authentication Kerberos`)—use an **FQDN** for the target.  
-- No **CredSSP** is required with this approach since the media is **copied** to the target first.  
-- For scheduled/managed runs, prefer a **domain service account** with read access to the media and remote admin rights on the target.
-
----
-
-## 🧪 Common Scenarios
-
-**Access denied on UNC (local mode)**  
-Use `-ShareCredential` or copy media locally first.
-
-**In a PSSession (double-hop)**  
-Use **orchestrator mode** with `-TargetComputer`, which copies media to the target and runs locally there.
-
-**ISO on a share**  
-The script automatically copies the ISO to `%TEMP%` on the target before mounting.
-
-**Auto-reboot desired**  
-Remove `/noreboot` from the setup arguments in the script.
-
-**Air-gapped / no updates**  
-Switch `/dynamicupdate enable` → `/dynamicupdate disable`.
-
-**Lab only (override compatibility)**  
-Add `/compat ignorewarning` (not recommended for production).
+- Use **FQDN** for `-TargetComputer` to ensure Kerberos.  
+- Orchestrator mode **does not** require CredSSP, because we copy to the target first.  
+- Scheduled tasks should run under a **domain service account** with the necessary rights (avoid `SYSTEM` for network access).
 
 ---
 
-## 🗂️ Repo Structure (suggested)
+## 🗂 Suggested Repo Layout
 
 ```
 .
-├─ upgrade-windows11.ps1     # Main script
-├─ README.md                 # This file
-└─ LICENSE                   # (Optional) MIT or your license
+├─ upgrade-windows11.ps1
+├─ README.md
+└─ LICENSE      # optional
 ```
-
----
-
-## 📄 Logging
-
-- All actions append to: `C:\Windows11UpgradeLog.txt`  
-- Sample entries:
-  ```
-  2025-08-12 13:40:15 - Starting system requirement checks...
-  2025-08-12 13:40:17 - ✅ TPM 2.0 found and ready.
-  2025-08-12 13:40:18 - Secure Boot is enabled.
-  2025-08-12 13:40:20 - x64 processor found.
-  2025-08-12 13:40:21 - Sufficient free space on C: (180.25 GB >= 64 GB).
-  2025-08-12 13:40:25 - Launching setup.exe from mounted ISO...
-  ```
 
 ---
 
 ## 🧯 Troubleshooting
 
-- **`Access is denied` (Test-Path / Copy-Item):**
-  - Ensure the account has **share + NTFS** read.
-  - Use `-ShareCredential` for UNC access.
-  - In orchestrator mode, media is **copied to the target** first—prefer that.
+- **Access is denied** to a UNC path  
+  Ensure share + NTFS read, or pass `-ShareCredential`. In orchestrator mode, media is copied to the target first.
 
-- **`Could not read from remote repository` (git push):**
-  - Use HTTPS remote and push with a **PAT**, or set up **SSH keys**.
+- **Detached HEAD / push errors (git)**  
+  Create a branch from your current state and push:  
+  `git switch -c fix/update && git push -u origin fix/update`
 
-- **`Confirm-SecureBootUEFI` fails:**
-  - Run as **Administrator** and ensure system boots in **UEFI mode**.
-  - Script falls back to `MSFT_SecureBoot` check.
+- **`Confirm-SecureBootUEFI` fails**  
+  Run as **Administrator** and ensure **UEFI** boot. The script falls back to `MSFT_SecureBoot` via CIM when possible.
 
-- **Setup exits quickly / no process found:**
-  - That can happen if Setup hands off; rely on logs and Windows Setup logs in `C:\$WINDOWS.~BT\Sources\Panther`.
+- **Setup exits quickly / process not found**  
+  Setup may hand off to other processes. Check `C:\$WINDOWS.~BT\Sources\Panther` and the module log: `C:\Windows11UpgradeLog.txt`.
 
 ---
 
-## 🤝 Contributing
+## ⚙️ Customization Tips
 
-PRs welcome! Please:
-1. Open an issue describing the change/bug.
-2. Target the `main` branch.
-3. Keep logging consistent and avoid breaking the local/orchestrator flows.
-
----
-
-## 📜 License
-
-MIT — see `LICENSE` for details.
+- **Auto‑reboot**: add `-AutoReboot`.  
+- **Disable dynamic update**: add `-DisableDynamicUpdate`.  
+- **Change IA URL/log paths**: override `-InstallAssistantDownloadURL`, `-DownloadDestination`, `-UpdateLogLocation`.
 
 ---
 
 ## ⚠️ Disclaimer
 
-This script runs an **in-place OS upgrade**. Test thoroughly in a lab before production.  
-You are responsible for validating compatibility with your imaging, security, AV, disk encryption, and device management stack.
+This script performs an **in‑place OS upgrade**. Test thoroughly before production use. Validate compatibility with your security tooling, disk encryption, and device management stack.
