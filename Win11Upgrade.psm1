@@ -1,8 +1,8 @@
 # Win11Upgrade.psm1
-# Version: 1.2.1
+# Version: 1.2.2
 # Windows 11 in-place upgrade helpers (local + remote orchestrator)
 # Supports: Setup.exe (ISO/folder/direct) OR Windows 11 Installation Assistant
-# NOTE: Remote payloads are fully self-contained.
+# NOTE: Remote payloads are fully self-contained and the downloader uses BITS -> WebClient (no Invoke-WebRequest).
 
 $script:LogFile = "C:\Windows11UpgradeLog.txt"
 
@@ -175,23 +175,24 @@ function Invoke-Win11SetupFromMedia {
 
 function Invoke-Download {
     [CmdletBinding()]
-    param(
-        [Parameter(Mandatory=$true)][string]$URL,
-        [Parameter(Mandatory=$true)][string]$Path,
-        [int]$Attempts = 3,
-        [switch]$Overwrite
-    )
+    param([Parameter(Mandatory)][string]$URL,[Parameter(Mandatory)][string]$Path,[int]$Attempts = 3,[switch]$Overwrite)
     try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 } catch {}
     $dir = Split-Path -Parent $Path
     if (-not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
     if (Test-Path -LiteralPath $Path -and $Overwrite) { Remove-Item -LiteralPath $Path -Force }
     for ($i=1; $i -le $Attempts; $i++) {
         try {
-            Invoke-WebRequest -Uri $URL -OutFile $Path -MaximumRedirection 10 -ErrorAction Stop
+            Start-BitsTransfer -Source $URL -Destination $Path -ErrorAction Stop
             return $true
         } catch {
-            try { Start-BitsTransfer -Source $URL -Destination $Path -ErrorAction Stop; return $true }
-            catch { if ($i -eq $Attempts) { throw }; Start-Sleep -Seconds ([Math]::Min(60, 5 * $i)) }
+            try {
+                $wc = New-Object System.Net.WebClient
+                $wc.DownloadFile($URL, $Path)
+                return $true
+            } catch {
+                if ($i -eq $Attempts) { throw }
+                Start-Sleep -Seconds ([Math]::Min(60, 5 * $i))
+            }
         }
     }
 }
@@ -206,12 +207,15 @@ function Start-InstallationAssistant {
     if (-not (Test-IsElevated)) { Write-Log "Access denied. Please run with Administrator privileges."; return $false }
     try { $os = Get-CimInstance -ClassName Win32_OperatingSystem -ErrorAction Stop; if ($os.Caption -notmatch 'Windows 10') { Write-Log "This flow targets Windows 10 → 11 upgrades. Detected: $($os.Caption)." } } catch {}
     if (-not (Test-Path -LiteralPath $LogFolder)) { New-Item -ItemType Directory -Path $LogFolder -Force | Out-Null }
+
     Write-Log "Downloading Windows 11 Installation Assistant from $DownloadUrl ..."
     try { Invoke-Download -URL $DownloadUrl -Path $Destination -Attempts 3 -Overwrite | Out-Null }
-    catch { Write-Log "Failed to download Installation Assistant: $($_.Exception.Message)"; return $false }
+    catch { Write-Log ("Failed to download Installation Assistant: {0}`n{1}" -f $_.Exception.Message, ($_.InvocationInfo.PositionMessage)) ; return $false }
+
     $installedPath = 'C:\Program Files (x86)\WindowsInstallationAssistant\Windows10UpgraderApp.exe'
     $exe = if (Test-Path -LiteralPath $installedPath) { $installedPath } else { $Destination }
     if (-not (Test-Path -LiteralPath $exe)) { Write-Log "Installation Assistant executable not found at '$exe'."; return $false }
+
     $args = @("/QuietInstall","/SkipEULA","/NoRestartUI","/Auto Upgrade","/CopyLogs `"$LogFolder`"")
     $procArgs = @{
         FilePath=$exe; ArgumentList=$args;
@@ -315,7 +319,13 @@ function Start-Win11UpgradeRemote {
                     try{[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12}catch{}
                     $dir=Split-Path -Parent $Path;if(-not(Test-Path -LiteralPath $dir)){New-Item -ItemType Directory -Path $dir -Force|Out-Null}
                     if(Test-Path -LiteralPath $Path -and $Overwrite){Remove-Item -LiteralPath $Path -Force}
-                    for($i=1;$i -le $Attempts;$i++){try{Invoke-WebRequest -Uri $URL -OutFile $Path -MaximumRedirection 10 -ErrorAction Stop;return $true}catch{try{Start-BitsTransfer -Source $URL -Destination $Path -ErrorAction Stop;return $true}catch{if($i -eq $Attempts){throw};Start-Sleep -Seconds ([Math]::Min(60,5*$i))}}}
+                    for($i=1;$i -le $Attempts;$i++){
+                        try{ Start-BitsTransfer -Source $URL -Destination $Path -ErrorAction Stop; return $true }
+                        catch{
+                            try{ $wc=New-Object System.Net.WebClient; $wc.DownloadFile($URL,$Path); return $true }
+                            catch{ if($i -eq $Attempts){ throw }; Start-Sleep -Seconds ([Math]::Min(60,5*$i)) }
+                        }
+                    }
                 }
                 Write-Log "Validating requirements on remote..."
                 if (-not (Test-Win11Requirements)) { Write-Log "Minimum requirements not met. Aborting."; return }
@@ -323,7 +333,7 @@ function Start-Win11UpgradeRemote {
                 if (-not (Test-Path -LiteralPath $LogPath)) { New-Item -ItemType Directory -Path $LogPath -Force | Out-Null }
                 Write-Log "Downloading Windows 11 Installation Assistant from $Url ..."
                 try { Invoke-Download -URL $Url -Path $Dest -Attempts 3 -Overwrite | Out-Null }
-                catch { Write-Log "Failed to download Installation Assistant: $($_.Exception.Message)"; return }
+                catch { Write-Log ("Failed to download Installation Assistant: {0}`n{1}" -f $_.Exception.Message, ($_.InvocationInfo.PositionMessage)) ; return }
                 $installedPath='C:\Program Files (x86)\WindowsInstallationAssistant\Windows10UpgraderApp.exe'
                 $exe = if (Test-Path -LiteralPath $installedPath) { $installedPath } else { $Dest }
                 if (-not (Test-Path -LiteralPath $exe)) { Write-Log "Installation Assistant executable not found at '$exe'."; return }
