@@ -91,7 +91,11 @@ function Invoke-Download {
 
     $dir = Split-Path -Parent $Path
     if (-not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
-    if (Test-Path -LiteralPath $Path -and $Overwrite) { Remove-Item -LiteralPath $Path -Force }
+    
+    if ($Overwrite -and (Test-Path -LiteralPath $Path)) {
+    Remove-Item -LiteralPath $Path -Force
+    }
+
 
     for ($i=1; $i -le $Attempts; $i++) {
         try {
@@ -194,7 +198,7 @@ function Start-InstallationAssistant {
         FilePath = $exe; ArgumentList = $args;
         RedirectStandardOutput = (Join-Path $LogFolder "$([guid]::NewGuid()).stdout.log");
         RedirectStandardError  = (Join-Path $LogFolder "$([guid]::NewGuid()).stderr.log");
-        NoNewWindow = $true; WindowStyle = 'Hidden'; PassThru = $true; ErrorAction = 'Stop'
+        WindowStyle = 'Hidden'; PassThru = $true; ErrorAction = 'Stop'
     }
     try {
         Write-Log "Launching Installation Assistant silently..."
