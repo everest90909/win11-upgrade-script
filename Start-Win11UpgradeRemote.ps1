@@ -10,7 +10,7 @@ Import-Module ActiveDirectory
 Import-Module .\Win11Upgrade.psm1 -Force     # path to the module you downloaded
 
 # ======= EDIT THESE =======
-$OuDn                  = 'OU=Workstations,OU=Corp,DC=contoso,DC=com'
+$OuDn                  = 'OU=Workstations,OU=IT DEPARTMENT,DC=DickSmith,DC=com'
 $UseInstallationAssistant = $true            # $true = use Installation Assistant; $false = use Setup.exe media
 $MediaPath             = '\\fileserver\dist\Win11_24H2\Win11_24H2.iso'  # used only if $UseInstallationAssistant:$false
 $ShareCredential       = $null               # if MediaPath is a UNC and needs alternate creds: Get-Credential
